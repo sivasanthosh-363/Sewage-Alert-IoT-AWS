@@ -1,0 +1,225 @@
+#include <WiFi.h>
+#include <WiFiClientSecure.h>
+#include <PubSubClient.h>  // for MQTT connection
+#include <ArduinoJson.h>
+
+// Wi-Fi Credentials
+const char* ssid = "Siva";
+const char* password = "siva1234";
+
+// AWS IoT Core Credentials
+const char* mqtt_server = "a20t3kpkr9fkzv-ats.iot.ap-south-1.amazonaws.com"; // Example: "a1b2c3d4e5f6-ats.iot.us-east-1.amazonaws.com"
+const char* mqtt_topic = "sewage/sensorData";
+const char* clientID = "ESP32_Sewage_Detection";
+
+const char* certificate_pem_crt = R"EOF(
+-----BEGIN CERTIFICATE-----
+MIIDWTCCAkGgAwIBAgIULIwlYvsPGdjkksRsZvdpeqL67pkwDQYJKoZIhvcNAQEL
+BQAwTTFLMEkGA1UECwxCQW1hem9uIFdlYiBTZXJ2aWNlcyBPPUFtYXpvbi5jb20g
+SW5jLiBMPVNlYXR0bGUgU1Q9V2FzaGluZ3RvbiBDPVVTMB4XDTI1MDIwMzAyMTYz
+OVoXDTQ5MTIzMTIzNTk1OVowHjEcMBoGA1UEAwwTQVdTIElvVCBDZXJ0aWZpY2F0
+ZTCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAM7TIOLrq0Y12wHhif/A
+CveIzGKZq1ddbY1RE72SD4zZheJb74MMUgwTURgNNtUXtLy22sJJBjT8GlBig/Es
+d0Lz5viTN6jkpajFwJGuw2YUeDHB4jIflz8wLzrYrLPR1ljCxyElb6Eiey28y2DP
+Ps55hxCtcj9muLMf4BizVcg/3Dt2j+5QPEGeXwjEBpt0rE+gIDGb5Euk97gSBFhZ
+DDGR5kyff2PpcYHScvkODONlHaJ56s0lKFCZSmlzWmQ7pu1+LsF7qiHd8fZVqB/p
+7gkNkrt8jDYWgW4q+uQLiC1Vuugw80Y05wsWk4cQVKvMJp/CCd9lxvOGprICNv38
+frMCAwEAAaNgMF4wHwYDVR0jBBgwFoAUNpyyDbzNVkR24M7YC0dg612UsQQwHQYD
+VR0OBBYEFPfB14LSk7Hkwjrxx0y5hPtawW+FMAwGA1UdEwEB/wQCMAAwDgYDVR0P
+AQH/BAQDAgeAMA0GCSqGSIb3DQEBCwUAA4IBAQBAvcn8UByIiCvV7znwLE5wdks1
+CvyN69mV7WKAHWm0LhUPahE/b92v+BXxmtuSR+xNI5adZ1g+naDHAZVpAfqR6O31
+WZ6csXfgmjwWNord1fhpbwmaqBaPCeaYsumQKA4abgDNVsuMVMcVRUrKEtX8k0wH
+6bKu5JO18U3D8dhsURDhzDfcOGe3imZtMrFO6q+/ap+bmgI0N+k0JEW+1LWwNMH7
+1L4PKv4LJ3ypcR9D/uXzWI7tQTo01RSlqor3zWt9/8RjnQxRTCJsgG9t3Ykvb9x1
+dQG09YFMP9nyRzDpgJfpR/WxKhTJ3RLI89KnttNv9blz8vRND13qcpPD5lop
+-----END CERTIFICATE-----
+)EOF";
+
+const char* private_pem_key = R"EOF(
+-----BEGIN RSA PRIVATE KEY-----
+MIIEpQIBAAKCAQEAztMg4uurRjXbAeGJ/8AK94jMYpmrV11tjVETvZIPjNmF4lvv
+gwxSDBNRGA021Re0vLbawkkGNPwaUGKD8Sx3QvPm+JM3qOSlqMXAka7DZhR4McHi
+Mh+XPzAvOtiss9HWWMLHISVvoSJ7LbzLYM8+znmHEK1yP2a4sx/gGLNVyD/cO3aP
+7lA8QZ5fCMQGm3SsT6AgMZvkS6T3uBIEWFkMMZHmTJ9/Y+lxgdJy+Q4M42Udonnq
+zSUoUJlKaXNaZDum7X4uwXuqId3x9lWoH+nuCQ2Su3yMNhaBbir65AuILVW66DDz
+RjTnCxaThxBUq8wmn8IJ32XG84amsgI2/fx+swIDAQABAoIBAQC1/2ejB4rx/5Y2
+84cB/LYp2MExytPRzy8F+eCLIqp4YTnFVO1Qvli8s4raxVYI8hFjNu0NpkDGA0oM
+joRYh65yxjnrZ3DFOF7mQw4PpF/hxgV2k4w+Wzo2qmoFOIHQwsgB13RvIIg4nSUT
+vFyjVfuIqbxG2rn8PKIvTc9fLQBBcwsPmJFJE89u7/j/su37hTVi+/y7uTBAk6z7
+cylXQFfVbjgVPBo06J0Ely1CmN9wW3hkReDw2ZKjtrZaHahGdyb1ODsFuVLNa1oY
+r4bFTtnxxQaDUNryJMeiqKCJzk6JnWEkP43odt+128NBpFdJRSRRxmW7FTyc9pex
+/yH7VXeBAoGBAPJfHj8ao/TYf3rrbDKeV0GH0amOeapPPlGrGjmPHJRXonjgcuzJ
+4OQi2+O8bJ7N5U1C36xcezGW8qyJYUz7FNEDhaSchQ3iZlpzUEoomSfL/TXio7Iq
+4J8BdS4P30JMK5LKxeZAvvNLK33y8O6mw1fHNXhA5EtedPsfEqVt//+hAoGBANp0
+UmqwuVGQWMSHHfiOPWsrlxnRaB1xovfpHha3+D55INPMYForAlZ/uzgODjRPCMFc
+mbuC81WrtxFJcdPcw82O2YJ0xqF5TGSmJPd0sZfmpilezXpMRToQF7hhcAChdvUx
+GQsM4R5w8y9fQ6TH2oBr7CBBy9+qCuk60Sb/Ha3TAoGAZVP86jbyCuAkU7hu8K6g
+HiZxMij9loUwsaYN/bhmI2KL62sywOoZmmc0dP6GjtHXprhpmL7FRlMsO5Pn2O4z
+orqNOeex/L8FOZVyIL7eYPP4dXm+JDOm2vMaEVrTZP1BTkp1+DBjZIWttidGMRAJ
+JP6EzTSb/SKNV5uDCSR23WECgYEArGUV0VqLtOFsHBPhRBDESXoJ8Xb/ahUOngQb
+GaSvRGYE0QA9nYrJeoessKzu6rrgVvAD5iWOcLJlcz/5k09qOiMcZcZQJof6EIfJ
+Lnup1w1PXeCR2YytKQggIALNB8JkhVTsxXqxgXtzfpP4ZubM+YGxwzcJdAXWPH6N
+JfA4dL8CgYEAtrx5aRBBKe+fFiyGiqquRwZt2kDODRRm5+/K5sVb5pJsaQr1xisx
+qwo0oxCnP5mmbgqvTLs/f6Ul8cPwM/wm/s8b5yz2PP/sQl1MeYwG4Xq3uxvb8jQR
+RJUC9LWFDcvZsCHUw3f926mCXxExZyKNPS6xIJlNm4f5MFHTcvYs2bY=
+-----END RSA PRIVATE KEY-----
+)EOF";
+
+const char* aws_root_ca = R"EOF(
+-----BEGIN CERTIFICATE-----
+MIIDQTCCAimgAwIBAgITBmyfz5m/jAo54vB4ikPmljZbyjANBgkqhkiG9w0BAQsF
+ADA5MQswCQYDVQQGEwJVUzEPMA0GA1UEChMGQW1hem9uMRkwFwYDVQQDExBBbWF6
+b24gUm9vdCBDQSAxMB4XDTE1MDUyNjAwMDAwMFoXDTM4MDExNzAwMDAwMFowOTEL
+MAkGA1UEBhMCVVMxDzANBgNVBAoTBkFtYXpvbjEZMBcGA1UEAxMQQW1hem9uIFJv
+b3QgQ0EgMTCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBALJ4gHHKeNXj
+ca9HgFB0fW7Y14h29Jlo91ghYPl0hAEvrAIthtOgQ3pOsqTQNroBvo3bSMgHFzZM
+9O6II8c+6zf1tRn4SWiw3te5djgdYZ6k/oI2peVKVuRF4fn9tBb6dNqcmzU5L/qw
+IFAGbHrQgLKm+a/sRxmPUDgH3KKHOVj4utWp+UhnMJbulHheb4mjUcAwhmahRWa6
+VOujw5H5SNz/0egwLX0tdHA114gk957EWW67c4cX8jJGKLhD+rcdqsq08p8kDi1L
+93FcXmn/6pUCyziKrlA4b9v7LWIbxcceVOF34GfID5yHI9Y/QCB/IIDEgEw+OyQm
+jgSubJrIqg0CAwEAAaNCMEAwDwYDVR0TAQH/BAUwAwEB/zAOBgNVHQ8BAf8EBAMC
+AYYwHQYDVR0OBBYEFIQYzIU07LwMlJQuCFmcx7IQTgoIMA0GCSqGSIb3DQEBCwUA
+A4IBAQCY8jdaQZChGsV2USggNiMOruYou6r4lK5IpDB/G/wkjUu0yKGX9rbxenDI
+U5PMCCjjmCXPI6T53iHTfIUJrU6adTrCC2qJeHZERxhlbI1Bjjt/msv0tadQ1wUs
+N+gDS63pYaACbvXy8MWy7Vu33PqUXHeeE6V/Uq2V8viTO96LXFvKWlJbYK8U90vv
+o/ufQJVtMVT8QtPHRh8jrdkPSHCa2XV4cdFyQzR1bldZwgJcJmApzyMZFo6IQ6XU
+5MsI+yMRQ+hDKXJioaldXgjUkK642M4UwtBV8ob2xJNDd2ZhwLnoQdeXeGADbkpy
+rqXRfboQnoZsG4q5WTP468SQvvG5
+-----END CERTIFICATE-----
+)EOF";
+
+
+// Pin Configurations
+#define trigPin 12     // Ultrasonic Trig pin
+#define echoPin 14     // Ultrasonic Echo pin
+#define gasPin 34      // MQ2 AO pin
+#define irPin 27       // IR sensor OUT pin
+#define buzzerPin 26   // Buzzer pin
+#define ledPin 12      // LED pin
+
+// Constants for MQ2 Sensor
+float RLOAD = 10.0; // Load resistance in kilo-ohms
+float RZERO = 76.63; // Resistance in clean air (calibration value)
+
+// IR Sensor Threshold
+#define IR_THRESHOLD 5000
+
+WiFiClientSecure espClient;
+PubSubClient client(espClient);
+
+void connectWiFi() {
+  Serial.print("Connecting to WiFi");
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    Serial.print(".");
+    delay(1000);
+  }
+  Serial.println("Connected!");
+}
+
+void connectAWS() {
+  espClient.setCACert(aws_root_ca);
+  espClient.setCertificate(certificate_pem_crt);
+  espClient.setPrivateKey(private_pem_key);
+
+  client.setServer(mqtt_server, 8883);
+  while (!client.connected()) {
+    Serial.print("Connecting to AWS IoT...");
+    if (client.connect(clientID)) {
+      Serial.println("Connected!");
+    } else {
+      Serial.print("Failed, rc=");
+      Serial.print(client.state());
+      Serial.println(" Retrying...");
+      delay(2000);
+    }
+  }
+}
+
+void setup() {
+  Serial.begin(115200);
+  
+  pinMode(trigPin, OUTPUT);
+  pinMode(echoPin, INPUT);
+  pinMode(irPin, INPUT);
+  pinMode(buzzerPin, OUTPUT);
+  pinMode(ledPin, OUTPUT);
+
+  connectWiFi();
+  connectAWS();
+}
+
+String detectGasType(float ppm) {
+  if (ppm > 300000) return "LPG";
+  else return "Unknown";
+}
+
+String calculateAQI(float ppm) {
+  if (ppm > 600000) return "Hazardous";  // Hazardous
+  else if (ppm > 500000) return "Very Unhealthy"; // Very Unhealthy
+  else if (ppm > 400000) return "Unhealthy"; // Unhealthy
+  else if (ppm > 300000) return "Moderate";  // Moderate
+  else return "Good";   // Good
+}
+
+void loop() {
+  // MQ2 Sensor Readings
+  int gasValue = analogRead(gasPin);
+  float voltage = (gasValue / 4095.0) * 3.3;
+  float resistance = (RLOAD * (3.3 - voltage)) / voltage;
+  float ratio = resistance / RZERO;
+  float ppm = pow(10, ((log10(ratio) - 0.69) / -0.33));
+  String gasType = detectGasType(ppm);
+  String airQualityIndex = calculateAQI(ppm);
+
+  // Ultrasonic Sensor Readings
+  digitalWrite(trigPin, LOW);
+  delayMicroseconds(2);
+  digitalWrite(trigPin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trigPin, LOW);
+  long duration = pulseIn(echoPin, HIGH);
+  float distance = duration * 0.034 / 2;
+
+  // IR Sensor Readings
+  int irValue = analogRead(irPin);
+  bool movementDetected = (irValue > IR_THRESHOLD);
+
+  bool alert = false;
+
+  // Buzzer Alert
+  if (airQualityIndex == "Hazardous" || gasType == "LPG" || ppm > 300000 || distance < 20 || irValue > IR_THRESHOLD) {
+    tone(buzzerPin, 1000);
+    digitalWrite(ledPin, HIGH); // Turn LED ON
+     alert = true;  // Set alert flag
+    Serial.println("ALERT: Unsafe Condition Detected!");
+  } else {
+    noTone(buzzerPin);
+    digitalWrite(ledPin, LOW); // Turn LED OFF
+  }
+
+  // Create JSON payload
+  StaticJsonDocument<256> jsonDoc;
+  jsonDoc["ppm"] = ppm;
+  jsonDoc["gasType"] = gasType;
+  jsonDoc["airQualityIndex"] = airQualityIndex;
+  jsonDoc["distance"] = distance;
+  jsonDoc["irValue"] = irValue;
+  jsonDoc["movementDetected"] = movementDetected;
+  jsonDoc["alert"] = alert;  // Send alert flag in MQTT payload
+
+  char payload[256];
+  serializeJson(jsonDoc, payload);
+
+  // Publish data to AWS IoT
+  if (client.connected()) {
+    client.publish(mqtt_topic, payload);
+    Serial.println("Data Sent to AWS IoT!");
+  } else {
+    Serial.println("AWS IoT Disconnected! Reconnecting...");
+    connectAWS();
+  }
+
+  Serial.println(payload);
+  delay(2000);
+}
